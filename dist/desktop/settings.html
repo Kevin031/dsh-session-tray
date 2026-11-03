@@ -58,7 +58,7 @@
       <h2>使用方式</h2>
       <p class="hint">点击单行展开会话卡片；点击卡片右上角的「折叠」恢复单行。</p>
       <p class="hint">拖动单行或卡片左侧的手柄，也可拖动卡片标题栏，调整浮窗位置。</p>
-      <p class="hint">右键菜单可最小化到托盘。通知默认跟随悬浮框，也可固定在桌面右下角；单击托盘图标恢复悬浮框，右键打开菜单。</p>
+      <p class="hint">Mac 任务栏用橙/绿数字表示运行/完成，0 隐藏；从图标菜单恢复浮窗。Windows 使用托盘。</p>
     </section>
     <section>
       <h2>通知</h2>
@@ -75,9 +75,9 @@
       </label>
       <label class="option duration-option">
         <strong>通知位置</strong>
-        <small>默认跟随悬浮框；托盘模式使用桌面右下角。</small>
+        <small>固定角落：Mac 右上、Win 右下。</small>
         <select id="notification-placement" aria-label="通知位置">
-          <option value="dock" selected>跟随悬浮框</option><option value="corner">桌面右下角</option>
+          <option value="dock" selected>跟随悬浮框</option><option value="corner">桌面角落（Mac 右上 / Win 右下）</option>
         </select>
       </label>
       <label class="option duration-option">

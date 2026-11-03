@@ -7,7 +7,7 @@ import { apply } from '../index.js'
 const root = new URL('../', import.meta.url)
 test('桌面分发清单覆盖所有实际产物且哈希与源码一致', async () => {
   const manifest = JSON.parse(await readFile(new URL('dist/desktop/manifest.json', root), 'utf8'))
-  for (const file of ['main.cjs', 'preload.cjs', 'dock.html', 'notifications.html', 'settings.html', 'taskbar.cjs', 'tray-platform.cjs']) {
+  for (const file of ['main.cjs', 'preload.cjs', 'dock.html', 'notifications.html', 'settings.html', 'taskbar.cjs', 'tray-platform.cjs', 'taskbar-image.cjs']) {
     const bytes = await readFile(new URL(`dist/desktop/${file}`, root))
     assert.equal(createHash('sha256').update(bytes).digest('hex'), manifest.files[file])
     assert.deepEqual(bytes, await readFile(new URL(`helper/${file}`, root)))

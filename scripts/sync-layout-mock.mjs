@@ -46,6 +46,7 @@ const page = `<!doctype html>
     .desktop-scene { position: relative; width: 440px; max-width: 100%; height: 340px; border: 1px dashed #ffffff30; border-radius: 12px; background: #191e23; overflow: auto; }
     .desktop-scene > span { display: block; margin: 12px; color: #a0a9b2; }
     .corner-anchor { position: absolute; right: 4px; bottom: 4px; width: 390px; }
+    .corner-anchor.mac { top: 16px; bottom: auto; }
     .corner-frame { width: 390px; max-width: none; height: 260px; }
     .caption { max-width: 440px; margin: 10px 0 0; color: #a0a9b2; }
     #status { display: block; margin-top: 24px; min-height: 36px; }
@@ -55,7 +56,7 @@ const page = `<!doctype html>
 <body>
 <main>
   <h1>桌面状态栏 · 实际 UI 预览</h1>
-  <p class="note">直接复用当前浮窗、通知和设置页面源码。桌面运行时通知默认跟随悬浮框，也可选桌面右下角；托盘模式使用 390 px。下面把通知放在浮窗上方只对照宽度和密度，不是系统级位置验收；不会连接真实会话、保存桌面设置或操作系统托盘。</p>
+  <p class="note">直接复用当前浮窗、通知和设置页面源码。桌面运行时通知默认跟随悬浮框，也可选桌面角落（macOS 右上角、Windows 右下角）；托盘模式使用 390 px。下面把通知放在浮窗上方只对照宽度和密度，不是系统级位置验收；不会连接真实会话、保存桌面设置或操作系统托盘。</p>
   <div class="tools">
     <label>会话场景 <select id="scenario"><option value="mixed">运行中 / 待确认 / 已完成</option><option value="done">全部完成</option><option value="pending">仅待确认</option><option value="empty">无会话</option><option value="stale">未连接</option></select></label>
     <label>浮窗宽度 <input id="width" type="range" min="200" max="720" value="300"><output id="width-value">300 px</output></label>
@@ -63,10 +64,11 @@ const page = `<!doctype html>
     <button id="replay-done" type="button">重播完成通知 · 10 秒</button>
   </div>
   <div class="stage">
-    <section class="case"><h2>单行 · 紧凑通知</h2><iframe id="compact-notices" class="notice-frame" title="单行紧凑通知"></iframe><iframe id="bar" class="dock-frame" title="单行浮窗"></iframe><p class="caption">单行通知为紧凑样式，宽度与浮窗一致。默认跟随悬浮框，选择右下角时固定到桌面角落。左右边缘支持键盘调宽，双击恢复默认。</p></section>
-    <section class="case"><h2>展开卡片 · 常规通知</h2><iframe id="regular-notices" class="regular-frame" title="卡片常规通知"></iframe><iframe id="card" class="dock-frame" title="展开会话卡片"></iframe><p class="caption">卡片替换单行。通知为常规样式，宽度与悬浮框一致。默认跟随悬浮框，也可选择屏幕右下角。托盘模式没有浮窗可对齐，使用 390 px。</p></section>
-    <section class="case"><h2>桌面右下角 · 常规通知</h2><div class="desktop-scene"><span>模拟桌面工作区</span><div class="corner-anchor"><iframe id="corner-notices" class="corner-frame" title="桌面右下角通知"></iframe></div></div><p class="caption">选择桌面右下角时在此显示，跟随悬浮框时在左侧两种密度中显示。距工作区右侧和底部各 4 px。仅模拟位置，不创建系统窗口。</p></section>
-    <section class="case"><h2>DSH 插件设置 · 桌面端</h2><div class="tray-control"><label><span><strong>最小化到托盘</strong><small>开启后隐藏悬浮框，通知继续显示；关闭或单击系统托盘图标恢复。重启后保留此设置。</small></span><input id="tray-mode" type="checkbox" role="switch" aria-label="最小化到托盘"></label><button id="restore-tray" type="button">模拟单击托盘图标</button></div><p class="caption">仅模拟开关、浮窗显隐及恢复后的状态同步，不创建系统托盘、不保存真实设置。</p></section>
+    <section class="case"><h2>单行 · 紧凑通知</h2><iframe id="compact-notices" class="notice-frame" title="单行紧凑通知"></iframe><iframe id="bar" class="dock-frame" title="单行浮窗"></iframe><p class="caption">单行通知为紧凑样式，宽度与浮窗一致。默认跟随悬浮框，选择固定角落时在 macOS 右上角、Windows 右下角显示。左右边缘支持键盘调宽，双击恢复默认。</p></section>
+    <section class="case"><h2>展开卡片 · 常规通知</h2><iframe id="regular-notices" class="regular-frame" title="卡片常规通知"></iframe><iframe id="card" class="dock-frame" title="展开会话卡片"></iframe><p class="caption">卡片替换单行。通知为常规样式，宽度与悬浮框一致。默认跟随悬浮框，也可选择屏幕右下角（macOS 为右上角）。托盘模式没有浮窗可对齐，使用 390 px。</p></section>
+    <section class="case"><h2>Windows 桌面右下角 · 常规通知</h2><div class="desktop-scene"><span>模拟桌面工作区</span><div class="corner-anchor"><iframe id="corner-notices" class="corner-frame" title="桌面右下角通知"></iframe></div></div><p class="caption">选择桌面右下角时在此显示，跟随悬浮框时在左侧两种密度中显示。距工作区右侧和底部各 4 px。仅模拟位置，不创建系统窗口。</p></section>
+    <section class="case"><h2>macOS 桌面右上角 · 常规通知</h2><div class="desktop-scene"><div class="corner-anchor mac"><iframe id="mac-corner-notices" class="corner-frame" title="macOS 右上角通知"></iframe></div></div><p class="caption">macOS 固定角落和菜单栏模式使用右上角，距工作区顶部 16 px、右侧 4 px；工作区已避开菜单栏。仅模拟位置，不创建系统窗口。</p></section>
+    <section class="case"><h2>DSH 插件设置 · 桌面端</h2><div class="tray-control"><label><span><strong>最小化到任务栏（Mac）/ 托盘（Win）</strong><small>隐藏浮窗后，Mac 顶部任务栏使用橙/绿数字 Tag 表示运行/完成，0 隐藏，通知继续显示；从图标菜单恢复。</small></span><input id="tray-mode" type="checkbox" role="switch" aria-label="最小化到任务栏或托盘"></label><button id="restore-tray" type="button">模拟恢复悬浮框</button><div id="taskbar-preview" style="display:none;margin-top:16px;padding:10px;border:1px solid #ffffff30;border-radius:8px" aria-label="macOS 任务栏模拟"><button id="taskbar-toggle-menu" type="button" aria-label="模拟展开任务栏会话菜单" style="margin:0;padding:0;background:none;border:0"><svg aria-hidden="true" viewBox="0 0 18 18" style="width:18px;height:18px;vertical-align:middle;margin-right:3px"><g fill="none" stroke-linejoin="round" stroke-linecap="round"><path d="M3.5 3.5h11a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zM5.5 7.5h1m2.5 0h3.5m-7 3h6" stroke="#000b" stroke-width="2.25"/><path d="M3.5 3.5h11a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zM5.5 7.5h1m2.5 0h3.5m-7 3h6" stroke="#f4f5f7" stroke-width="1.25"/></g></svg><strong id="taskbar-counts" role="status"></strong></button><div id="taskbar-menu-preview" style="display:none;margin-top:8px;padding:8px;border:1px solid #ffffff30;border-radius:10px;max-width:320px;text-align:left" aria-label="任务栏会话菜单模拟"></div></div></div><p class="caption">仅模拟任务栏计数、点击展开分组会话菜单及标题跳转、浮窗显隐和状态同步；可切换运行、完成、空闲和断线场景，不创建系统托盘或任务栏、不保存真实设置。</p></section>
     <section class="case"><h2>设置 · 560 × 640</h2><iframe id="settings" class="settings-frame" title="会话状态设置"></iframe><p class="caption">通知开关立即应用到预览，关闭通知不影响会话列表。完成通知默认停留 10 秒，也可选不自动消失；时长修改仅对新通知生效，点击重播验证。关闭按钮仅模拟关闭。</p></section>
   </div>
   <output id="status" aria-live="polite">预览已就绪。可点击展开、折叠、会话和通知按钮。</output>
@@ -92,13 +94,15 @@ function updateDurationLabel() {
   document.getElementById('replay-done').textContent = '重播完成通知 · ' + (seconds === 0 ? '不自动消失' : seconds + ' 秒');
 }
 let trayMode = false;
+let taskbarMenuOpen = false;
 /** 模拟托盘显隐和从托盘恢复；不触发系统操作。 @param {boolean} value */
 function setTrayMode(value) {
   trayMode = value;
   document.getElementById('tray-mode').checked = value;
   for (const id of ['bar', 'card']) frames.get(id).style.display = value ? 'none' : '';
   paintNotices();
-  report(value ? '已模拟最小化到托盘，通知使用桌面右下角。' : '已模拟恢复悬浮框，托盘开关已关闭。');
+  updateTaskbarPreview();
+  report(value ? '已模拟最小化到任务栏（Mac）/ 托盘（Win），Mac 显示当前会话数量，通知使用右上角。' : '已模拟恢复悬浮框，托盘开关已关闭。');
 }
 let pendingVisible = true;
 let doneVisible = false;
@@ -115,6 +119,21 @@ function snapshot() {
     : scenario === 'empty' || scenario === 'stale' ? [] : sampleRows;
   return { stale: scenario === 'stale', rows };
 }
+function updateTaskbarPreview() {
+  const next = snapshot();
+  const running = next.rows.filter(row => row.section === 'running').length;
+  const done = next.rows.filter(row => row.section !== 'running' && row.label === '已完成').length;
+  document.getElementById('taskbar-preview').style.display = trayMode ? '' : 'none';
+  document.getElementById('taskbar-counts').innerHTML = next.stale ? '未连接' : [
+    running > 0 ? '<span title="运行" style="display:inline-block;font:500 11px/14px system-ui,-apple-system,sans-serif;min-width:16px;padding:0 4px;border-radius:4px;vertical-align:middle;background:#edb869;color:#23362d;text-align:center;margin-right:3px">' + running + '</span>' : '',
+    done > 0 ? '<span title="完成" style="display:inline-block;font:500 11px/14px system-ui,-apple-system,sans-serif;min-width:16px;padding:0 4px;border-radius:4px;vertical-align:middle;background:#8bc9a6;color:#23362d;text-align:center">' + done + '</span>' : ''
+  ].join('');
+  const menu = document.getElementById('taskbar-menu-preview');
+  menu.style.display = trayMode && taskbarMenuOpen ? '' : 'none';
+  const escape = text => String(text).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('\"', '&quot;');
+  const groups = [{title:'进行中',rows:next.rows.filter(row=>row.section==='running')},{title:'已完成',rows:next.rows.filter(row=>row.section!=='running' && row.label==='已完成')}];
+  menu.innerHTML = next.stale ? '未连接 · 等待会话状态' : groups.filter(group=>group.rows.length).map(group=>'<p style=\"margin:4px 0;color:#a0a9b2\">'+group.title+' ('+group.rows.length+')</p>'+group.rows.map(row=>'<button type=\"button\" data-session-id=\"'+escape(row.id)+'\" style=\"display:block;margin:2px 0;width:100%;text-align:left\">'+escape(row.title)+'</button>').join('')).join('') || '暂无运行或完成会话';
+}
 /** 更新预览操作回执，不调用真实桌面接口。 @param {string} text */
 function report(text) { document.getElementById('status').textContent = text; }
 /** 将消息广播给已加载的同源预览框架。 @param {string} type @param {unknown} value */
@@ -126,8 +145,8 @@ function paintNotices() {
   const rows = [];
   if (doneVisible && (prefs.notifyTaskDone || manualPreview)) rows.push({ ...sampleRows[3], kind: 'done', durationSeconds: doneDuration });
   if (pendingVisible && prefs.notifyConversation) rows.push({ ...sampleRows[2], kind: 'pending' });
-  for (const id of ['compact-notices', 'regular-notices', 'corner-notices']) {
-    const visible = (id === 'corner-notices') === (prefs.notificationPlacement === 'corner' || trayMode);
+  for (const id of ['compact-notices', 'regular-notices', 'corner-notices', 'mac-corner-notices']) {
+    const visible = (id === 'corner-notices' || id === 'mac-corner-notices') === (prefs.notificationPlacement === 'corner' || trayMode);
     frames.get(id)?.contentWindow.postMessage({ type: 'notifications', value: visible ? rows : [] }, '*');
   }
 }
@@ -167,7 +186,7 @@ function installBridge(initial) {
     resetWidth: () => send('width', 300),
     nudgeWidth: (edge, delta) => send('nudge', delta),
     onNotifications: callback => subscribe('notifications', callback, initial.prefs.notifyConversation ? [{ id: 'pending', title: '关联仓库并提交首版至 master', label: '等待确认', kind: 'pending' }] : []),
-    onNotificationLayout: callback => subscribe('layout', callback, { density: initial.density }),
+    onNotificationLayout: callback => subscribe('layout', callback, { density: initial.density, anchor: initial.id === 'mac-corner-notices' ? 'top' : 'bottom' }),
     notificationHeight: value => send('height', value),
     dismissNotification: value => send('dismiss', value),
     getNotifyPrefs: async () => initial.prefs,
@@ -224,6 +243,7 @@ window.addEventListener('message', event => {
 mount('compact-notices', 'notifications.html');
 mount('regular-notices', 'notifications.html');
 mount('corner-notices', 'notifications.html');
+mount('mac-corner-notices', 'notifications.html');
 
 mount('bar', 'dock.html');
 mount('card', 'dock.html', true);
@@ -240,7 +260,7 @@ window.updatePreviewSources = next => {
   }
   report('实际 UI 已通过 Vite HMR 更新；当前场景、宽度与通知偏好已保留。');
 };
-document.getElementById('scenario').addEventListener('change', () => { broadcast('snapshot', snapshot()); report('已切换会话场景，通知重播独立于会话快照。'); });
+document.getElementById('scenario').addEventListener('change', () => { broadcast('snapshot', snapshot()); updateTaskbarPreview(); report('已切换会话场景，通知重播独立于会话快照。'); });
 document.getElementById('width').addEventListener('input', event => setWidth(Number(event.target.value)));
 document.getElementById('replay').addEventListener('click', () => {
   pendingVisible = true; paintNotices(); report(prefs.notifyConversation ? '待确认通知保持显示，直到手动收起。' : '对话通知已关闭，请在设置中开启后重播。');
@@ -257,6 +277,11 @@ function showDone(manual = false) {
 }
 document.getElementById('replay-done').addEventListener('click', () => showDone());
 document.getElementById('tray-mode').addEventListener('change', event => setTrayMode(event.target.checked === true));
+document.getElementById('taskbar-toggle-menu').addEventListener('click', () => { taskbarMenuOpen = !taskbarMenuOpen; updateTaskbarPreview(); });
+document.getElementById('taskbar-menu-preview').addEventListener('click', event => {
+  const id = event.target.dataset?.sessionId;
+  if (id) report('模拟打开会话：' + (sampleRows.find(row => row.id === id)?.title || id) + '。不会打开真实会话。');
+});
 document.getElementById('restore-tray').addEventListener('click', () => setTrayMode(false));
 </script>
 </body>

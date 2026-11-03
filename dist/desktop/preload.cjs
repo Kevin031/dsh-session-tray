@@ -64,7 +64,7 @@ contextBridge.exposeInMainWorld('sessionDock', {
     ipcRenderer.on('notifications', (_event, rows) => listener(rows))
   },
   /**
-   * @param {(layout: { density?: 'compact' | 'regular', width?: number }) => void} listener
+   * @param {(layout: { density?: 'compact' | 'regular', width?: number, anchor?: 'top' | 'bottom' }) => void} listener
    */
   onNotificationLayout(listener) {
     ipcRenderer.on('notification-layout', (_event, layout) => listener(layout))

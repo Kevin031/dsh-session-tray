@@ -1,12 +1,13 @@
 {
   "schemaVersion": 1,
   "files": {
-    "main.cjs": "e4e0e27c8eca9ab414bd5cc0c9d497d0011c2c2ed754c8334e8b9f78f38830dc",
-    "preload.cjs": "76a69d1a0ac044757186fd3f7dc577b8bbc88aff3e3f710ac591f3742d3055cd",
+    "main.cjs": "163106dfc15e890233daef7e6f99d5065f3e2a71be504660acca985371fb083a",
+    "preload.cjs": "b57ea3042667264e0668aa18946c069b276b7643e150feed8141874b57acbd84",
     "dock.html": "890bb5c74081df5a2a79779bc5401b3cda595e4b0690d8e31c6327ec691fed33",
-    "notifications.html": "62db96a61e31a26e2c2c161510d121e560077ad97422b5a48ac16e2ac18fcb6a",
-    "settings.html": "bac2c0c97a1ee39f16b9f175dfdbba0adf4aeb4e924015b448c41f56fc836010",
-    "taskbar.cjs": "6e12ff3830b78e3b21f97f83f2dcf400185eee6c746cb54f0a43f4dad6ed771c",
-    "tray-platform.cjs": "465f1533e4e9d4f274f283b4e0aea0b61329d20fe94d9606d1510ea339ba7148"
+    "notifications.html": "2dc6a2af4c8d73e9baae258afe04725381f59c90ccbfd26c0ef919fce441cbd4",
+    "settings.html": "6fd701802c8359da22d9fe0c1a9f8a62ec00353f85962072a7297b9c900fcef1",
+    "taskbar.cjs": "3985f51758f68c03f36130906d2db5d142cabe0451c81867e81e691bb1587cec",
+    "tray-platform.cjs": "465f1533e4e9d4f274f283b4e0aea0b61329d20fe94d9606d1510ea339ba7148",
+    "taskbar-image.cjs": "a7841af5e42ccb1a09f63bf7f794046f3f919ad5cb6cff0582bfb62cf114591e"
   }
 }

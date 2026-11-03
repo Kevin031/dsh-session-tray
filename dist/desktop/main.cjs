@@ -4,7 +4,8 @@ const http = require('node:http')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
-const { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, shell, Tray } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, screen, shell, Tray } = require('electron')
+const { taskbarCanvas } = require('./taskbar-image.cjs')
 const { trayPlatform } = require('./tray-platform.cjs')
 
 const bridgeUrl = process.env.DSH_SESSION_TRAY_URL || ''
@@ -176,14 +177,14 @@ function visibleNotifications(cycles) {
 }
 
 /**
- * 右下角和托盘模式固定使用390px常规样式，不受浮窗影响。
+ * 固定角落和托盘模式固定使用390px常规样式，不受浮窗影响。
  * 浮窗上方模式跟随浮窗宽度，单行用紧凑样式，展开用常规样式。
- * @returns {{ density: 'compact' | 'regular', width: number }}
+ * @returns {{ density: 'compact' | 'regular', width: number, anchor: 'top' | 'bottom' }}
  */
 function notificationLayout() {
   const fixed = config.notificationPlacement === 'corner' || config.minimizedToTray === true
   const compact = !fixed && expanded !== true
-  return { density: compact ? 'compact' : 'regular', width: fixed ? NOTICE_WIDTH : currentDockWidth() }
+  return { density: compact ? 'compact' : 'regular', width: fixed ? NOTICE_WIDTH : currentDockWidth(), anchor: fixed && process.platform === 'darwin' ? 'top' : 'bottom' }
 }
 
 /**
@@ -220,7 +221,7 @@ function notificationBoundsFor(bounds, area, contentHeight, noticeWidth = NOTICE
   return { x: Math.round(x), y: Math.round(Math.max(area.y, Math.min(y, area.y + area.height - height))), width, height }
 }
 
-/** 右下角通知与工作区右缘留 4px，比原位置向右移动 12px。 */
+/** 固定角落通知与工作区右缘留 4px。 */
 const CORNER_MARGIN_X = 4
 /** 保留通知栈顶部安全间距，不随水平位置调整而改变。 */
 const CORNER_MARGIN_TOP = 16
@@ -228,7 +229,7 @@ const CORNER_MARGIN_TOP = 16
 const CORNER_MARGIN_BOTTOM = 4
 
 /**
- * 通知固定在给定工作区右下角，不跟随悬浮框位置。
+ * 通知固定在工作区角落：macOS 右上角，Windows 右下角，不跟随浮窗。
  * @param {Electron.Rectangle} area
  * @param {number} contentHeight
  * @param {number} [noticeWidth]
@@ -241,14 +242,16 @@ function cornerNotificationBounds(area, contentHeight, noticeWidth = NOTICE_WIDT
   const height = Math.min(Math.max(1, Math.ceil(contentHeight)), Math.max(1, area.height - marginBottom - CORNER_MARGIN_TOP))
   return {
     x: Math.round(Math.max(area.x, area.x + area.width - width - marginX)),
-    y: Math.round(Math.max(area.y, area.y + area.height - height - marginBottom)),
+    y: process.platform === 'darwin'
+      ? Math.round(area.y + Math.min(CORNER_MARGIN_TOP, Math.max(0, area.height - height)))
+      : Math.round(Math.max(area.y, area.y + area.height - height - marginBottom)),
     width: Math.round(width),
     height: Math.round(height),
   }
 }
 
 /**
- * 浮窗模式优先上方，右下角及托盘模式固定在给定工作区右下角。
+ * 浮窗模式优先上方；固定角落及托盘模式在 macOS 右上角、Windows 右下角。
  * @param {'dock' | 'tray'} mode
  * @param {Electron.Rectangle | null} dockBounds
  * @param {Electron.Rectangle} area
@@ -262,7 +265,7 @@ function notificationWindowBounds(mode, dockBounds, area, contentHeight, noticeW
     : cornerNotificationBounds(area, contentHeight, noticeWidth)
 }
 
-/** 右下角固定在主屏幕，浮窗模式跟随所在屏幕；不改变焦点。 */
+/** 固定角落模式使用主屏幕，浮窗模式跟随所在屏幕；不改变焦点。 */
 function positionNotifications() {
   if (!notifications || notifications.isDestroyed()) return
   const fixed = config.notificationPlacement === 'corner' || config.minimizedToTray === true
@@ -288,6 +291,7 @@ function createNotifications() {
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true },
   })
   notifications.setAlwaysOnTop(true, 'screen-saver')
+  if (process.platform === 'darwin') notifications.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   notifications.once('ready-to-show', () => {
     notificationReady = true
     notificationPayload = ''
@@ -566,6 +570,8 @@ let leftButtonProbe = null
 
 /** 探测失败时不在轮询里结束拖动，改等渲染进程的 pointerup。 @returns {boolean} */
 function isLeftButtonDown() {
+  // macOS uses renderer pointer capture; never load user32 or Windows-only FFI.
+  if (process.platform !== 'win32') return true
   if (leftButtonProbe === false) return true
   try {
     if (!leftButtonProbe) leftButtonProbe = require('./taskbar.cjs').isLeftButtonDown
@@ -725,7 +731,8 @@ async function openSession(sessionId) {
   // 预览整卡即便可点击，也绝不进入真实会话跳转链路。
   if (sessionId === '__preview-completion__') return
   if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(sessionId)) return
-  await request('POST', '/open', JSON.stringify({ sessionId }))
+  const response = await request('POST', '/open', JSON.stringify({ sessionId }))
+  if (response.status !== 200) throw new Error(`会话跳转请求失败：HTTP ${response.status}`)
   await shell.openExternal('dsh://open').catch((error) => {
     console.error('[dsh-session-tray] dsh://open failed:', error)
   })
@@ -736,16 +743,18 @@ async function refresh() {
     await pushTrayPrefs()
     const trayRevision = trayPrefsRevision
     const response = await request('GET', '/snapshot')
-    if (response.status !== 200) return
+    if (response.status !== 200) { syncTaskbar(true); return }
     const next = JSON.stringify(response.json?.rows ?? [])
     const prev = JSON.stringify(snapshot.rows ?? [])
     snapshot = response.json
+    syncTaskbar()
     applyManagement(trayRevision === trayPrefsRevision ? snapshot : { ...snapshot, ui: { ...snapshot.ui, minimizedToTray: undefined } })
     reconcileNotificationCycles(notificationCycles, snapshot)
     syncNotifications()
     dock?.webContents.send('snapshot', snapshot)
     if (next !== prev && expanded) applyBounds()
   } catch (error) {
+    syncTaskbar(true)
     console.error('[dsh-session-tray] snapshot failed:', error instanceof Error ? error.message : error)
   }
 }
@@ -776,6 +785,8 @@ function createDock() {
     },
   })
   dock.setAlwaysOnTop(true, 'screen-saver')
+  if (process.platform === 'darwin') dock.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  dock.on('blur', () => { if (widthDrag) endWidthDrag() })
   void dock.loadFile(path.join(__dirname, 'dock.html'))
   dock.once('ready-to-show', () => {
     presentDock()
@@ -790,6 +801,13 @@ function createDock() {
 }
 
 app.on('window-all-closed', () => {})
+// A non-closable accessory window can veto Electron's default quit path on macOS.
+// Manager termination must exit deterministically rather than wait for UI closure.
+process.on('SIGTERM', () => app.exit(0))
+process.on('SIGINT', () => app.exit(0))
+app.on('before-quit', () => {
+  for (const window of BrowserWindow.getAllWindows()) window.setClosable(true)
+})
 
 /** @type {{ reconcileNotificationCycles: typeof reconcileNotificationCycles, visibleNotifications: typeof visibleNotifications, notificationBoundsFor: typeof notificationBoundsFor, cornerNotificationBounds: typeof cornerNotificationBounds, notificationWindowBounds: typeof notificationWindowBounds, sweepExpiredNotifications: typeof sweepExpiredNotifications }} */
 module.exports = { reconcileNotificationCycles, visibleNotifications, notificationBoundsFor, cornerNotificationBounds, notificationWindowBounds, sweepExpiredNotifications }
@@ -848,7 +866,7 @@ function closeSettings() {
  */
 function dockMenuTemplate() {
   return [
-    { label: '最小化到托盘', click: () => minimizeToTray() },
+    { label: process.platform === 'darwin' ? '最小化到任务栏' : '最小化到托盘', click: () => minimizeToTray() },
     { label: '设置', click: () => openSettings() },
   ]
 }
@@ -858,6 +876,11 @@ function dockMenuTemplate() {
  */
 function trayMenuTemplate() {
   return [
+    ...(process.platform === 'darwin' ? [
+      { label: taskbarDisconnected ? '未连接 · 等待会话状态' : (taskbarSummary().title || '暂无运行或完成会话'), enabled: false },
+      ...taskbarSessionMenu(),
+      { type: 'separator' },
+    ] : []),
     { label: '显示悬浮框', click: () => restoreFromTray() },
     { label: '设置', click: () => openSettings() },
   ]
@@ -868,17 +891,118 @@ function trayMenuTemplate() {
  * @returns {Electron.NativeImage | null}
  */
 function loadTrayImage() {
+  const filename = process.platform === 'darwin' ? 'trayTemplate.png' : 'tray.png'
   const candidates = [
     process.env.DSH_SESSION_TRAY_ICON,
-    path.join(__dirname, '..', 'assets', 'tray.png'),
-    path.join(__dirname, '..', '..', 'assets', 'tray.png'),
+    path.join(__dirname, '..', 'assets', filename),
+    path.join(__dirname, '..', '..', 'assets', filename),
   ]
   for (const file of candidates) {
     if (!file || !fs.existsSync(file)) continue
     const image = nativeImage.createFromPath(file)
-    if (!image.isEmpty()) return image
+    if (!image.isEmpty()) {
+      if (process.platform === 'darwin') {
+        const menuImage = image.resize({ width: 18, height: 18 })
+        menuImage.setTemplateImage(true)
+        return menuImage
+      }
+      return image
+    }
   }
   return null
+}
+
+/** 唯一且可导航的真实会话；菜单与数量使用相同来源。 */
+function taskbarSessionRows() {
+  const rows = new Map()
+  for (const row of snapshot.rows ?? []) {
+    if (row && typeof row.id === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(row.id) && row.id !== '__preview-completion__') rows.set(row.id, row)
+  }
+  return [...rows.values()]
+}
+/** @returns {Electron.MenuItemConstructorOptions[]} */
+function taskbarSessionMenu() {
+  if (taskbarDisconnected || snapshot.stale) return []
+  const rows = taskbarSessionRows()
+  const groups = [
+    { label: '进行中', rows: rows.filter(row => row.section === 'running') },
+    { label: '已完成', rows: rows.filter(row => row.section !== 'running' && row.label === '已完成') },
+  ]
+  return groups.filter(group => group.rows.length).flatMap(group => [
+    { type: 'separator' },
+    { label: `${group.label} (${group.rows.length})`, enabled: false },
+    ...group.rows.map(row => ({
+      id: `taskbar-session:${row.id}`,
+      label: Array.from(String(row.title || '未命名会话').replace(/[\u0000-\u001f\u007f]/g, ' ').trim() || '未命名会话').slice(0, 80).join(''),
+      async click() {
+        if (taskbarDisconnected || snapshot.stale) return
+        try { await openSession(row.id) }
+        catch (error) {
+          const reason = error instanceof Error ? error.message : String(error)
+          console.error('[dsh-session-tray] menu navigation failed:', reason)
+          dialog?.showErrorBox('无法打开会话', reason)
+        }
+      },
+    })),
+  ])
+}
+
+/** 当前快照的唯一会话计数；通知是否关闭/收起不影响计数。 */
+function taskbarSummary() {
+  const rows = taskbarSessionRows()
+  let running = 0
+  let done = 0
+  for (const row of rows.values()) {
+    if (row.section === 'running') running++
+    else if (row.label === '已完成') done++
+  }
+  const stale = snapshot.stale === true
+  const title = [running > 0 ? `运行 ${running}` : '', done > 0 ? `完成 ${done}` : ''].filter(Boolean).join(' · ')
+  return { running, done, stale, title: stale ? '未连接' : title }
+}
+let taskbarSignature = null
+let taskbarMenuSignature = null
+let taskbarDisconnected = true
+let taskbarRenderPromise = Promise.resolve()
+/** Render only plugin-owned, numeric state; discard late images after state changes. */
+async function renderTaskbarImage(current, summary, signature) {
+  try {
+    if (!dock || dock.isDestroyed()) return
+    const result = await dock.webContents.executeJavaScript(`(${taskbarCanvas.toString()})(${summary.running},${summary.done})`)
+    if (tray !== current || current.isDestroyed() || signature !== taskbarSignature) return
+    const image = nativeImage.createEmpty()
+    image.addRepresentation({ scaleFactor: result.scaleFactor, dataURL: result.dataURL })
+    image.setTemplateImage(false)
+    current.setImage(image)
+  } catch (error) {
+    if (tray !== current || current.isDestroyed() || signature !== taskbarSignature) return
+    taskbarSignature = null // Retry on the next refresh, retaining accessible counts.
+    current.setTitle([summary.running || '', summary.done || ''].filter(Boolean).join(' · '))
+    console.error('[dsh-session-tray] taskbar image failed:', error instanceof Error ? error.message : error)
+  }
+}
+/** 只在展示内容变化时更新原生任务栏，避免轮询反复重建菜单。 @param {boolean} [disconnected] */
+function syncTaskbar(disconnected = false) {
+  if (process.platform !== 'darwin' || !tray || tray.isDestroyed()) return
+  const summary = taskbarSummary()
+  taskbarDisconnected = disconnected || summary.stale
+  const menuSignature = JSON.stringify([taskbarDisconnected, taskbarDisconnected ? [] : taskbarSessionRows().filter(row => row.section === 'running' || row.label === '已完成').map(row => [row.id, row.title, row.section, row.label])])
+  if (menuSignature !== taskbarMenuSignature) {
+    tray.setContextMenu(trayMenu())
+    taskbarMenuSignature = menuSignature
+  }
+  const dark = nativeTheme?.shouldUseDarkColors === true
+  const signature = `${taskbarDisconnected}:${summary.running}:${summary.done}:${dark}`
+  if (signature === taskbarSignature) return
+  const needsTags = !taskbarDisconnected && (summary.running > 0 || summary.done > 0)
+  if (!needsTags) {
+    const image = loadTrayImage()
+    if (image) tray.setImage(image)
+  }
+  tray.setTitle(taskbarDisconnected ? '未连接' : '')
+  tray.setToolTip(`会话任务栏 · ${taskbarDisconnected ? '未连接' : (summary.title || '暂无运行或完成会话')}（橙色：运行；绿色：完成；点击菜单恢复）`)
+  taskbarSignature = signature
+  taskbarRenderPromise = needsTags ? renderTaskbarImage(tray, summary, signature) : Promise.resolve()
 }
 
 /** @returns {Electron.Menu} */
@@ -896,8 +1020,11 @@ function ensureTray() {
     const image = loadTrayImage()
     if (!image) throw new Error('tray icon missing')
     tray = new Tray(image)
-    tray.setToolTip('会话悬浮框（单击显示，右键菜单）')
-    tray.setContextMenu(trayMenu())
+    if (process.platform === 'darwin') syncTaskbar()
+    else {
+      tray.setToolTip('会话悬浮框（单击显示，右键菜单）')
+      tray.setContextMenu(trayMenu())
+    }
     if (trayPlatform(process.platform).leftClickPopsMenu) tray.on('click', () => restoreFromTray())
     tray.on('double-click', () => restoreFromTray())
     return true
@@ -910,6 +1037,8 @@ function ensureTray() {
 
 /** 移除托盘图标。重复调用安全。 */
 function destroyTray() {
+  taskbarSignature = null
+  taskbarMenuSignature = null
   if (!tray || tray.isDestroyed()) {
     tray = undefined
     return
@@ -935,7 +1064,7 @@ function minimizeToTray() {
   return true
 }
 
-/** 从托盘恢复悬浮框。通知仍固定在屏幕右下角。 */
+/** 从托盘恢复悬浮框。通知位置按用户选择重新计算。 */
 function restoreFromTray() {
   config.minimizedToTray = false
   saveConfig()
@@ -1033,6 +1162,11 @@ ipcMain.on('notify-prefs-set', (event, prefs) => {
 ipcMain.on('show-menu', () => showContextMenu())
 
 app.whenReady().then(() => {
+  // Accessory UI must not add a second Dock icon or steal focus from the host.
+  if (process.platform === 'darwin') {
+    app.dock?.hide()
+    nativeTheme?.on('updated', () => syncTaskbar())
+  }
   createDock()
   screen.on('display-metrics-changed', () => { applyBounds(); positionNotifications() })
   screen.on('display-removed', () => { applyBounds(); positionNotifications() })

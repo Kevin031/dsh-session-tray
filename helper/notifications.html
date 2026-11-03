@@ -36,7 +36,11 @@
     .notice button:focus-visible { outline: 2px solid #ffb494; outline-offset: 2px; }
     .notice-error { margin: 10px 0 0; color: #ffb494; font-size: 14px; }
     @keyframes rise-in { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-    @media (prefers-reduced-motion: reduce) { .notice { animation: none; } }
+    /* Top-right notices stay at their final position even before window height settles. */
+    body.top-anchored #stack { margin-top: 0; flex: none; }
+    body.top-anchored .notice { animation: fade-in 180ms ease-out both; }
+    @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .notice, body.top-anchored .notice { animation: none; } }
     body.compact { font-size: 12px; }
     body.compact #stack { gap: 8px; }
     body.compact .notice { border-radius: 8px; padding: 6px 6px 11px 12px; }
@@ -59,7 +63,9 @@
     const cards = new Map()
     /** 报告自然内容高度，栈超过工作区时由视口滚动，不丢弃通知。 */
     function reportHeight() {
-      window.sessionDock.notificationHeight(stack.scrollHeight)
+      // scrollHeight includes animated overflow (translateY), producing a second resize.
+      // offsetHeight measures stable layout geometry without the entrance transform.
+      window.sessionDock.notificationHeight(stack.offsetHeight)
     }
     /**
      * 只创建新周期节点，事件监听始终读取该节点的最新会话信息。
@@ -139,8 +145,9 @@
       if (removedFocus && stack.firstElementChild) stack.firstElementChild.querySelector('button').focus({ preventScroll: true })
       reportHeight()
     }
-    /** @param {{ density?: string }} layout */
+    /** @param {{ density?: string, anchor?: string }} layout */
     function applyLayout(layout) {
+      document.body.classList.toggle('top-anchored', layout?.anchor === 'top')
       document.body.classList.toggle('compact', layout?.density === 'compact')
       reportHeight()
     }

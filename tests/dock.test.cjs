@@ -19,21 +19,158 @@ function mainHarness(saved = { x: 2200, y: 1000 }) {
   }
   const area = { x: 1920, y: 0, width: 1920, height: 1040 }
   const fake = {
-    Tray: class { constructor() { this.events = {} } isDestroyed() { return false } setToolTip() {} setContextMenu() {} on(name, callback) { this.events[name] = callback } destroy() {} },
+    Tray: class { constructor() { this.events = {} } isDestroyed() { return false } setToolTip(value) { this.tooltip = value } setTitle(value) { this.title = value; this.titleUpdates = (this.titleUpdates || 0) + 1 } setImage(value) { this.image = value } setContextMenu(value) { this.menu = value; this.menuUpdates = (this.menuUpdates || 0) + 1 } on(name, callback) { this.events[name] = callback } destroy() {} },
     Menu: { buildFromTemplate: value => value },
+    nativeImage: { createEmpty() { return { addRepresentation(value) { this.representation = value }, setTemplateImage(value) { this.template = value } } } },
+    nativeTheme: { shouldUseDarkColors: false },
+    shell: { openExternal: async () => {} },
     app: { on() {}, whenReady: () => ({ then: () => ({ catch() {} }) }) },
     ipcMain: { handle() {}, on: (name, fn) => { handlers[name] = fn } },
     screen: { getDisplayMatching: () => ({ workArea: area }), getPrimaryDisplay: () => ({ workArea: area }) },
   }
   const context = vm.createContext({
     require: (id) => id === 'electron' ? fake : id === 'node:fs' ? fakeFs : id.startsWith('.') ? require(path.join(root, 'helper', id)) : require(id),
-    process: { platform: 'win32', env: { DSH_SESSION_TRAY_URL: 'http://localhost', DSH_SESSION_TRAY_TOKEN: 'test', DSH_SESSION_TRAY_CONFIG_PATH: 'widget.json' } },
+    process: { on(name, callback) { handlers[`process:${name}`] = callback }, platform: 'win32', env: { DSH_SESSION_TRAY_URL: 'http://localhost', DSH_SESSION_TRAY_TOKEN: 'test', DSH_SESSION_TRAY_CONFIG_PATH: 'widget.json' } },
     console, module: { exports: {} }, __dirname: path.join(root, 'helper'),
   })
   vm.runInContext(fs.readFileSync(path.join(root, 'helper/main.cjs'), 'utf8'), context)
   vm.runInContext('request = async () => ({ status: 200 })', context)
   return { handlers, saved: () => JSON.parse(files.get('widget.json')), run: (code) => vm.runInContext(code, context) }
 }
+
+test('macOS 任务栏显示独立会话数量，更新去重、空状态、断线和恢复', async () => {
+  const h = mainHarness()
+  h.run('dock={isDestroyed(){return false},hide(){},showInactive(){},setAlwaysOnTop(){},webContents:{send(){},executeJavaScript:async()=>({dataURL:"data:image/png;base64,fake",scaleFactor:2})}}; process.platform="darwin"; loadTrayImage=()=>({}); snapshot={stale:false,rows:[{id:"r",section:"running"},{id:"d",section:"attention",label:"已完成"},{id:"d",section:"attention",label:"已完成"},{id:"p",section:"attention",label:"待批准"}]}; config.notifyTaskDone=false; minimizeToTray()')
+  await h.run('taskbarRenderPromise')
+  assert.equal(h.run('dockMenuTemplate()[0].label'), '最小化到任务栏')
+  assert.equal(h.run('tray.title'), '')
+  assert.equal(h.run('tray.image.template'), false)
+  assert.equal(h.run('tray.image.representation.scaleFactor'), 2)
+  assert.equal(h.run('tray.menu[0].label'), '运行 1 · 完成 1')
+  assert.equal(h.run('tray.menu[0].enabled'), false)
+  assert.equal(h.run('tray.events.click'), undefined, 'macOS 单击应显示菜单，而不是直接恢复')
+  h.run('syncTaskbar(); syncTaskbar()')
+  assert.equal(h.run('tray.titleUpdates'), 1)
+  h.run('snapshot={stale:false,rows:[]}; syncTaskbar()')
+  assert.equal(h.run('tray.title'), '')
+  assert.equal(h.run('tray.menu[0].label'), '暂无运行或完成会话')
+  h.run('snapshot.stale=true; syncTaskbar()')
+  assert.equal(h.run('tray.title'), '未连接')
+  assert.match(h.run('tray.menu[0].label'), /等待会话状态/)
+  h.run('snapshot.stale=false; syncTaskbar(true)')
+  assert.equal(h.run('tray.title'), '未连接')
+  h.run('request=async()=>({status:200,json:{stale:false,rows:[{id:"new",section:"running"}]}}); syncNotifications=()=>{}')
+  await h.run('refresh()')
+  assert.equal(h.run('tray.title'), '')
+  await h.run('taskbarRenderPromise')
+  assert.equal(h.run('tray.image.representation.scaleFactor'), 2)
+  assert.match(h.run('tray.tooltip'), /运行 1/)
+  assert.doesNotMatch(h.run('tray.tooltip'), /完成 0/)
+  h.run('request=async()=>{throw new Error("offline")}')
+  await h.run('refresh()')
+  assert.equal(h.run('tray.title'), '未连接')
+  h.run('applyBounds=()=>{}; trayMenuTemplate().find(item=>item.label==="显示悬浮框").click()')
+  assert.equal(h.run('tray'), undefined)
+  assert.equal(h.saved().minimizedToTray, false)
+})
+
+test('任务栏菜单分组列出唯一会话，重命名和同数量换会话仍更新，点击按ID导航', async () => {
+  const h = mainHarness()
+  h.run('process.platform="darwin"; loadTrayImage=()=>({}); tray=new (require("electron").Tray)(); snapshot={stale:false,rows:[{id:"r",title:"运行任务",section:"running"},{id:"d",title:"旧标题",section:"attention",label:"已完成"},{id:"d",title:"完成任务",section:"attention",label:"已完成"},{id:"p",title:"待回答",section:"attention"}]}; globalThis.opened=[]; openSession=async id=>{opened.push(id)}; syncTaskbar()')
+  assert.equal(h.run('tray.menu.filter(item=>item.id).map(item=>item.label).join(",")'), '运行任务,完成任务')
+  assert.equal(h.run('tray.menu.some(item=>item.label==="进行中 (1)" && item.enabled===false)'), true)
+  assert.equal(h.run('tray.menu.some(item=>item.label==="已完成 (1)" && item.enabled===false)'), true)
+  await h.run('tray.menu.find(item=>item.id==="taskbar-session:r").click()')
+  await h.run('tray.menu.find(item=>item.id==="taskbar-session:d").click()')
+  assert.equal(h.run('opened.join(",")'), 'r,d')
+  h.run('snapshot.rows[0].title="重命名"; syncTaskbar()')
+  assert.equal(h.run('tray.menu.find(item=>item.id==="taskbar-session:r").label'), '重命名')
+  assert.equal(h.run('tray.menuUpdates'), 2)
+  assert.equal(h.run('tray.titleUpdates'), 1, '改标题不重绘数字图标')
+  h.run('snapshot.rows[0]={id:"new",title:"新会话",section:"running"}; syncTaskbar()')
+  assert.equal(h.run('tray.menu.some(item=>item.id==="taskbar-session:r")'), false)
+  await h.run('tray.menu.find(item=>item.id==="taskbar-session:new").click()')
+  assert.equal(h.run('opened.join(",")'), 'r,d,new')
+  h.run('globalThis.oldItem=tray.menu.find(item=>item.id==="taskbar-session:new"); syncTaskbar(true)')
+  assert.equal(h.run('tray.menu.some(item=>item.id)'), false)
+  await h.run('oldItem.click()')
+  assert.equal(h.run('opened.length'), 3, '断线后不执行过期菜单的导航')
+})
+
+test('会话导航共用私有桥接并唤起DSH；失败响应不假装跳转', async () => {
+  const h = mainHarness()
+  h.run('globalThis.routes=[]; require("electron").shell.openExternal=async url=>{routes.push(url)}; request=async(method,route,body)=>{routes.push(JSON.parse(body).sessionId); return {status:200}}')
+  await h.run('openSession("session-1")')
+  assert.equal(h.run('routes.join(",")'), 'session-1,dsh://open')
+  h.run('request=async()=>({status:500})')
+  await assert.rejects(h.run('openSession("session-2")'), /HTTP 500/)
+  assert.equal(h.run('routes.length'), 2)
+})
+
+test('异步系统字体绘制不能把过期计数覆盖到已清空的任务栏', async () => {
+  const h = mainHarness()
+  h.run('process.platform="darwin"; loadTrayImage=()=>({empty:true}); globalThis.finishImage=null; dock={isDestroyed(){return false},webContents:{executeJavaScript:()=>new Promise(resolve=>{finishImage=resolve})}}; snapshot={stale:false,rows:[{id:"r",section:"running"}]}; ensureTray()')
+  const pending = h.run('taskbarRenderPromise')
+  h.run('snapshot.rows=[]; syncTaskbar(); finishImage({dataURL:"old",scaleFactor:2})')
+  await pending
+  assert.equal(h.run('tray.image.empty'), true)
+})
+
+test('macOS 首次计数全零仍创建恢复菜单，仅显示图标', () => {
+  const h = mainHarness()
+  h.run('process.platform="darwin"; loadTrayImage=()=>({}); snapshot={stale:false,rows:[]}; minimizeToTray()')
+  assert.equal(h.run('tray.title'), '')
+  assert.equal(h.run('tray.menu[0].label'), '暂无运行或完成会话')
+  assert.equal(h.run('tray.menu.some(item=>item.label==="显示悬浮框")'), true)
+})
+
+test('Windows 托盘保持图标和原有菜单，不调用 macOS 任务栏标题 API', () => {
+  const h = mainHarness()
+  h.run('loadTrayImage=()=>({}); minimizeToTray(); syncTaskbar()')
+  assert.equal(h.run('tray.titleUpdates'), undefined)
+  assert.equal(h.run('dockMenuTemplate()[0].label'), '最小化到托盘')
+  assert.equal(h.run('tray.menu.length'), 2)
+})
+
+test('只有 macOS 固定角落和任务栏通知使用顶部锚点，Windows 和浮窗不变', () => {
+  const h = mainHarness()
+  h.run('process.platform="darwin"; config.notificationPlacement="corner"')
+  assert.equal(h.run('notificationLayout().anchor'), 'top')
+  h.run('config.notificationPlacement="dock"')
+  assert.equal(h.run('notificationLayout().anchor'), 'bottom')
+  h.run('config.minimizedToTray=true')
+  assert.equal(h.run('notificationLayout().anchor'), 'top')
+  h.run('process.platform="win32"')
+  assert.equal(h.run('notificationLayout().anchor'), 'bottom')
+})
+
+test('固定通知 macOS 右上、Windows 右下，动态高度不移动 macOS 顶部且不越界', () => {
+  const h = mainHarness()
+  for (const platform of ['darwin', 'win32']) {
+    h.run(`process.platform = ${JSON.stringify(platform)}`)
+    for (const height of [1, 120, 700, 5000]) {
+      const bounds = JSON.parse(h.run(`JSON.stringify(cornerNotificationBounds({x:-1920,y:32,width:1920,height:1000}, ${height}))`))
+      assert.equal(bounds.x + bounds.width, -4)
+      assert.ok(bounds.y >= 32)
+      assert.ok(bounds.y + bounds.height <= 1032)
+      if (platform === 'darwin') assert.equal(bounds.y, 48)
+      else assert.equal(bounds.y + bounds.height, 1028)
+    }
+    const tiny = JSON.parse(h.run('JSON.stringify(cornerNotificationBounds({x:0,y:0,width:2,height:1}, 500))'))
+    assert.equal(tiny.y, 0)
+    assert.equal(tiny.height, 1)
+  }
+})
+
+test('管理器终止信号直接退出，不被不可关闭浮窗阻塞', () => {
+  const h = mainHarness()
+  h.run('globalThis.exitCode = null; require("electron").app.exit = code => { exitCode = code }')
+  h.handlers['process:SIGTERM']()
+  assert.equal(h.run('exitCode'), 0)
+  h.run('exitCode = null')
+  h.handlers['process:SIGINT']()
+  assert.equal(h.run('exitCode'), 0)
+})
 
 test('首次启动默认单行，行卡片往返尺寸正确', () => {
   const h = mainHarness()

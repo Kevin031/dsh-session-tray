@@ -18,7 +18,7 @@
     "vite": "8.3.5"
   },
   "private": true,
-  "description": "Windows 桌面状态栏，支持设置页一键安装运行时、启停和位置管理。",
+  "description": "Windows 和 macOS 桌面状态栏，支持设置页一键安装运行时、启停和位置管理。",
   "type": "module",
   "exports": {
     ".": "./index.js",
@@ -33,6 +33,8 @@
     "locale/*.json",
     "icon.svg",
     "assets/tray.png",
+    "assets/trayTemplate.png",
+    "assets/trayTemplate@2x.png",
     "runtime-manager.js",
     "dist/desktop/**",
     "dist/client.js",
@@ -44,7 +46,8 @@
     "helper/notifications.html",
     "helper/settings.html",
     "helper/taskbar.cjs",
-    "helper/tray-platform.cjs"
+    "helper/tray-platform.cjs",
+    "helper/taskbar-image.cjs"
   ],
   "dsh": {
     "bundle": {

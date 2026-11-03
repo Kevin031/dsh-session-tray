@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 
 const root = new URL('../', import.meta.url)
-const files = ['main.cjs', 'preload.cjs', 'dock.html', 'notifications.html', 'settings.html', 'taskbar.cjs', 'tray-platform.cjs']
+const files = ['main.cjs', 'preload.cjs', 'dock.html', 'notifications.html', 'settings.html', 'taskbar.cjs', 'tray-platform.cjs', 'taskbar-image.cjs']
 await mkdir(new URL('dist/desktop/', root), { recursive: true })
 const hashes = {}
 for (const file of files) {

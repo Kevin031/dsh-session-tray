@@ -42,7 +42,7 @@ export function apply(ctx) {
 
   ctx.inject(['tools'], (scope) => scope.effect(() => scope.tools.register({
     name: 'session_tray_manage',
-    description: '查看 Windows 桌面状态栏状态，或按用户要求安装运行时、启用、停用、重启与重置位置。运行于 DSH 宿主电脑。',
+    description: '查看 Windows/macOS 桌面状态栏状态，或按用户要求安装运行时、启用、停用、重启与重置位置。运行于 DSH 宿主电脑。',
     parameters: { type: 'object', properties: { action: { type: 'string', enum: ['status', 'install', 'enable', 'disable', 'restart', 'reset-position'] } }, required: ['action'], additionalProperties: false },
     output: { schema: { type: 'object', additionalProperties: true }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
     async execute(args) {

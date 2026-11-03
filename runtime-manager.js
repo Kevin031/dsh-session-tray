@@ -4,7 +4,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import * as nodeFs from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, posix } from 'node:path'
+import { inflateRawSync } from 'node:zlib'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 
@@ -46,8 +47,11 @@ export function createRuntimeManager({ packageRoot, url, token, log = () => {}, 
   const home = deps.home ?? homedir()
   const root = join(home, '.dsh', 'dsh-session-tray')
   const configPath = join(root, 'manager.json')
-  const runtimeDir = join(root, 'runtime', `${ELECTRON_VERSION}-${arch}`)
-  const supported = platform === 'win32' && ['x64', 'arm64'].includes(arch)
+  // Preserve existing Windows installations; isolate macOS binaries by platform.
+  const runtimeDir = join(root, 'runtime', platform === 'win32' ? `${ELECTRON_VERSION}-${arch}` : `${ELECTRON_VERSION}-${platform}-${arch}`)
+  const executable = platform === 'darwin' ? 'Electron.app/Contents/MacOS/Electron' : 'electron.exe'
+  const managedExecutable = join(runtimeDir, executable)
+  const supported = ['win32', 'darwin'].includes(platform) && ['x64', 'arm64'].includes(arch)
   const launch = deps.spawn ?? spawn
   let disposed = false
   let child = null
@@ -72,9 +76,9 @@ export function createRuntimeManager({ packageRoot, url, token, log = () => {}, 
 
   /** 刷新本地可执行文件，外部兼容路径版本未知，不执行探测命令。 */
   function discover() {
-    const choices = [env.DSH_SESSION_TRAY_ELECTRON, join(runtimeDir, 'electron.exe'), join(home, '.dsh', 'electron', 'electron.exe')].filter(Boolean)
-    const path = supported ? choices.find((candidate) => { try { return existsSync(candidate) && readExecutable(candidate) } catch { return false } }) : null
-    state.runtime = { available: Boolean(path), path: path || null, version: path === join(runtimeDir, 'electron.exe') ? ELECTRON_VERSION : null }
+    const choices = [env.DSH_SESSION_TRAY_ELECTRON, managedExecutable, join(home, '.dsh', 'electron', executable)].filter(Boolean)
+    const path = supported ? choices.find((candidate) => { try { return existsSync(candidate) && readExecutable(candidate, platform) } catch { return false } }) : null
+    state.runtime = { available: Boolean(path), path: path || null, version: path === managedExecutable ? ELECTRON_VERSION : null }
   }
   /**
    * 管理配置里的显式开关优先；没有时回退到悬浮框自己保存的 widget.json。
@@ -177,7 +181,10 @@ export function createRuntimeManager({ packageRoot, url, token, log = () => {}, 
     const entry = join(packageRoot, 'dist', 'desktop', 'main.cjs')
     if (!existsSync(entry)) throw new Error(`助手构建产物不存在：${entry}`)
     /** @type {NodeJS.ProcessEnv} */
-    const childEnv = { ...env, DSH_SESSION_TRAY_URL: url, DSH_SESSION_TRAY_TOKEN: token, DSH_SESSION_TRAY_ICON: join(packageRoot, 'assets', 'tray.png'), DSH_SESSION_TRAY_CONFIG_PATH: join(root, 'widget.json'), DSH_SESSION_TRAY_MANAGER_CONFIG_PATH: configPath }
+    const childEnv = { ...env, DSH_SESSION_TRAY_URL: url, DSH_SESSION_TRAY_TOKEN: token, DSH_SESSION_TRAY_ICON: join(packageRoot, 'assets', platform === 'darwin' ? 'trayTemplate.png' : 'tray.png'), DSH_SESSION_TRAY_CONFIG_PATH: join(root, 'widget.json'), DSH_SESSION_TRAY_MANAGER_CONFIG_PATH: configPath }
+    if (platform === 'win32') {
+      try { childEnv.DSH_SESSION_TRAY_KOFFI = require.resolve('koffi') } catch { /* pointer capture remains available without native FFI */ }
+    }
     delete childEnv.ELECTRON_RUN_AS_NODE
     state.phase = 'starting'
     state.error = null
@@ -223,7 +230,7 @@ export function createRuntimeManager({ packageRoot, url, token, log = () => {}, 
       state.error = null; state.progress = 0; state.phase = 'downloading'
       await fs.mkdir(dirname(runtimeDir), { recursive: true })
       temp = await fs.mkdtemp(join(dirname(runtimeDir), '.install-'))
-      const archive = `electron-v${ELECTRON_VERSION}-win32-${arch}.zip`
+      const archive = `electron-v${ELECTRON_VERSION}-${platform}-${arch}.zip`
       const zip = join(temp, 'electron.zip')
       const sums = join(temp, 'SHASUMS256.txt')
       const get = deps.download ?? download
@@ -237,19 +244,19 @@ export function createRuntimeManager({ packageRoot, url, token, log = () => {}, 
       const hash = createHash('sha256')
       for await (const chunk of createReadStream(zip, { signal: abort.signal })) hash.update(chunk)
       if (hash.digest('hex') !== hashes[0][1].toLowerCase()) throw new Error('Electron SHA256 校验失败')
-      await validateZip(zip)
+      await validateZip(zip, platform)
       abort.signal.throwIfAborted()
       state.phase = 'extracting'
       const staging = join(temp, 'unpacked')
-      await (deps.extract ?? extract)(zip, staging, abort.signal)
+      await (deps.extract ?? extract)(zip, staging, abort.signal, platform)
       abort.signal.throwIfAborted()
-      if (!(await fs.stat(join(staging, 'electron.exe'))).isFile()) throw new Error('解压结果缺少 electron.exe')
+      if (!readExecutable(join(staging, executable), platform)) throw new Error(`解压结果缺少可执行文件：${executable}`)
       // 先停止旧进程，避免文件锁和两个助手并存；绝不删除已安装目录。
       stoppedPrevious = Boolean(child)
       await enqueue(stop, true)
       abort.signal.throwIfAborted()
       if (!existsSync(runtimeDir)) await renameWithRetry(staging, runtimeDir, abort.signal)
-      else if (!readExecutable(join(runtimeDir, 'electron.exe'))) throw new Error('目标运行时目录已存在但无效，请手动检查')
+      else if (!readExecutable(managedExecutable, platform)) throw new Error('目标运行时目录已存在但无效，请手动检查')
       await enqueue(() => {
         if (disposed) return
         discover()
@@ -279,7 +286,7 @@ export function createRuntimeManager({ packageRoot, url, token, log = () => {}, 
     if (disposed) return status()
     if (!['install', 'enable', 'disable', 'restart', 'reset-position'].includes(name)) { fail(new Error('未知运行时操作')); return status() }
     if (name === 'install') {
-      if (!supported) fail(new Error('仅支持 Windows x64/arm64'))
+      if (!supported) fail(new Error('仅支持 Windows 和 macOS 的 x64/arm64'))
       else if (!installJob) installJob = install()
       return status()
     }
@@ -294,7 +301,7 @@ export function createRuntimeManager({ packageRoot, url, token, log = () => {}, 
         return
       }
       if (name === 'disable') { save({ ...config, enabled: false }); await stop(); state.phase = 'stopped'; return }
-      if (!supported) throw new Error('仅支持 Windows x64/arm64')
+      if (!supported) throw new Error('仅支持 Windows 和 macOS 的 x64/arm64')
       if (installJob) return
       save({ ...config, enabled: true })
       if (name === 'restart') await stop()
@@ -342,8 +349,8 @@ async function removeTemp(path) {
 /** @param {unknown} error @returns {string} */
 function message(error) { return error instanceof Error ? error.message : String(error) }
 
-/** 检查普通文件，避免将目录作为可执行文件。 @param {string} path */
-function readExecutable(path) { try { const stat = statSync(path); return stat.isFile() && stat.size > 0 } catch { return false } }
+/** 检查普通文件，避免将目录作为可执行文件。 @param {string} path @param {string} [platform] */
+function readExecutable(path, platform = process.platform) { try { const stat = statSync(path); return stat.isFile() && stat.size > 0 && (platform !== 'darwin' || (stat.mode & 0o111) !== 0) } catch { return false } }
 
 /**
  * 只允许官方发布入口及 GitHub 官方资产重定向；总超时含响应体，有限跳转/大小。
@@ -386,9 +393,9 @@ async function download(url, destination, { signal, limit, onProgress }) {
 
 /**
  * 验证中心目录和本地头，禁止 ZIP64、多卷、加密、链接、路径穿越、Windows ADS/保留名及覆盖。
- * @param {string} path
+ * @param {string} path @param {string} [platform]
  */
-async function validateZip(path) {
+export async function validateZip(path, platform = 'win32') {
   const data = await fs.readFile(path)
   if (data.length > ZIP_LIMIT || data.length < 22) throw new Error('ZIP 大小无效')
   let end = -1
@@ -402,6 +409,7 @@ async function validateZip(path) {
   if (data.readUInt16LE(end + 4) || data.readUInt16LE(end + 6) || count !== data.readUInt16LE(end + 8) || count === 65535 || count > 20000 || offset + size !== end) throw new Error('不支持的 ZIP 目录格式')
   const names = new Set()
   const ranges = []
+  const links = []
   let expanded = 0
   let cursor = offset
   for (let i = 0; i < count; i++) {
@@ -426,19 +434,43 @@ async function validateZip(path) {
     if (names.has(key)) throw new Error('ZIP 包含重复路径')
     names.add(key)
     const mode = data.readUInt32LE(cursor + 38) >>> 16
-    if ((mode & 0xf000) && ![0x8000, 0x4000].includes(mode & 0xf000)) throw new Error('ZIP 不允许链接或特殊文件')
+    if ((mode & 0xf000) && ![0x8000, 0x4000, ...(platform === 'darwin' ? [0xa000] : [])].includes(mode & 0xf000)) throw new Error('ZIP 不允许链接或特殊文件')
     expanded += uncompressed
     if (expanded > EXPANDED_LIMIT) throw new Error('ZIP 解压大小超过限制')
     if (local + 30 > offset || data.readUInt32LE(local) !== 0x04034b50) throw new Error('ZIP 本地头无效')
     const localLength = data.readUInt16LE(local + 26)
     const body = local + 30 + localLength + data.readUInt16LE(local + 28)
     if (body + compressed > offset || !data.subarray(local + 30, local + 30 + localLength).equals(rawName) || data.readUInt16LE(local + 6) !== flags || data.readUInt16LE(local + 8) !== method) throw new Error('ZIP 本地头和目录不匹配')
+    if ((mode & 0xf000) === 0xa000) {
+      // macOS frameworks contain relative symlinks. Validate their payload before ditto.
+      if (uncompressed > 4096) throw new Error('ZIP 链接目标过长')
+      const packed = data.subarray(body, body + compressed)
+      const payload = method === 0 ? packed : inflateRawSync(packed, { maxOutputLength: 4096 })
+      const target = payload.toString('utf8')
+      const resolved = posix.normalize(posix.join(posix.dirname(name), target))
+      if (payload.length !== uncompressed || !target || /[\x00-\x1f\x7f\\:]/.test(target) || posix.isAbsolute(target) || !resolved.startsWith('Electron.app/')) throw new Error('ZIP 包含不安全链接')
+      links.push({ key, target: resolved.toLowerCase() })
+    }
     validateExtra(data.subarray(cursor + 46 + length, cursor + 46 + length + extra))
     validateExtra(data.subarray(local + 30 + localLength, body))
     ranges.push([local, body + compressed])
     cursor = next
   }
-  if (cursor !== end || !names.has('electron.exe')) throw new Error('ZIP 目录不完整或缺少 electron.exe')
+  const required = platform === 'darwin' ? 'electron.app/contents/macos/electron' : 'electron.exe'
+  if (cursor !== end || !names.has(required)) throw new Error(`ZIP 目录不完整或缺少 ${required}`)
+  for (const link of links) {
+    if ([...names].some((name) => name.startsWith(`${link.key}/`))) throw new Error('ZIP 不允许在链接下写入条目')
+    let target = link.target
+    const seen = new Set([link.key])
+    for (;;) {
+      const next = links.find((other) => target === other.key || target.startsWith(`${other.key}/`))
+      if (!next) break
+      if (seen.has(next.key)) throw new Error('ZIP 包含循环链接')
+      seen.add(next.key)
+      target = next.target + target.slice(next.key.length)
+    }
+    if (!names.has(target)) throw new Error('ZIP 链接目标不存在')
+  }
   ranges.sort((a, b) => a[0] - b[0])
   for (let i = 1; i < ranges.length; i++) if (ranges[i][0] < ranges[i - 1][1]) throw new Error('ZIP 条目数据重叠')
 }
@@ -456,14 +488,16 @@ function validateExtra(extra) {
   }
 }
 
-/** 固定脚本、环境传路径，不拼接用户输入的 PowerShell 命令。 @param {string} zip @param {string} destination @param {AbortSignal} signal */
-async function extract(zip, destination, signal) {
+/** 使用系统解压器并传递独立参数；macOS 保留签名、权限和框架链接。 @param {string} zip @param {string} destination @param {AbortSignal} signal @param {string} [platform] */
+async function extract(zip, destination, signal, platform = process.platform) {
   const script = "$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath $env:DSH_TRAY_ZIP -DestinationPath $env:DSH_TRAY_OUT"
   await new Promise((resolve, reject) => {
-    const child = spawn(join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], { shell: false, windowsHide: true, stdio: 'ignore', env: { ...process.env, DSH_TRAY_ZIP: zip, DSH_TRAY_OUT: destination }, signal, timeout: 120000 })
+    const command = platform === 'darwin' ? '/usr/bin/ditto' : join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+    const args = platform === 'darwin' ? ['-x', '-k', zip, destination] : ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script]
+    const child = spawn(command, args, { shell: false, windowsHide: true, stdio: 'ignore', env: { ...process.env, DSH_TRAY_ZIP: zip, DSH_TRAY_OUT: destination }, signal, timeout: 120000 })
     let failure = null
     child.once('error', (error) => { failure = error })
     // close 在进程退出后触发；取消时不能只等 error 就删除仍在写入的临时目录。
-    child.once('close', (code) => failure ? reject(failure) : code === 0 ? resolve() : reject(new Error(`Expand-Archive 失败：${code}`)))
+    child.once('close', (code) => failure ? reject(failure) : code === 0 ? resolve() : reject(new Error(`运行时解压失败：${code}`)))
   })
 }

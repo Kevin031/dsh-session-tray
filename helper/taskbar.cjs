@@ -1,6 +1,8 @@
 'use strict'
 
-const koffi = require('D:/DeepSeekHarness/resources/app.asar.unpacked/dsh/node_modules/koffi/index.cjs')
+// Resolve from the installed package or a trusted path supplied by the host,
+// never from a developer's machine-specific drive.
+const koffi = require(process.env.DSH_SESSION_TRAY_KOFFI || 'koffi')
 
 const user32 = koffi.load('user32.dll')
 const RECT = koffi.struct('RECT', {

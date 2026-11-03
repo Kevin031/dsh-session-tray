@@ -368,8 +368,60 @@ test('清理 EBUSY 不破坏安装成功及 ready 状态', async (t) => {
   assert.equal(manager.status().error, null)
 })
 
-test('非 Windows 或非支持架构不联网安装', async (t) => {
+test('非 Windows/macOS 平台不联网安装', async (t) => {
   const { manager } = await fixture(t, { platform: 'linux' })
   assert.equal(manager.status().supported, false)
   assert.match((await manager.action('install')).error, /Windows/)
+})
+
+for (const platform of ['win32', 'darwin']) for (const arch of ['x64', 'arm64']) {
+  test(`${platform}/${arch} 安装、校验、ready、重启及停用`, async (t) => {
+    const executable = platform === 'darwin' ? 'Electron.app/Contents/MacOS/Electron' : 'electron.exe'
+    const zip = zipFor(executable)
+    const digest = createHash('sha256').update(zip).digest('hex')
+    const urls = []
+    const { manager, calls } = await fixture(t, {
+      platform, arch,
+      // Keep installer cleanup deterministic; fixture teardown removes its whole home.
+      async removeTemp() {},
+      async download(url, destination) {
+        urls.push(url)
+        await writeFile(destination, url.endsWith('.txt') ? `${digest}  electron-v${ELECTRON_VERSION}-${platform}-${arch}.zip\n` : zip)
+      },
+      async extract(_zip, destination, _signal, receivedPlatform) {
+        assert.equal(receivedPlatform, platform)
+        const target = join(destination, executable)
+        await mkdir(join(target, '..'), { recursive: true })
+        await writeFile(target, 'fake executable', { mode: 0o755 })
+      },
+    })
+    assert.equal(manager.status().supported, true)
+    await manager.action('install')
+    await until(manager, state => state.phase === 'starting')
+    assert.equal(urls.length, 2)
+    assert.ok(urls[1].endsWith(`-${platform}-${arch}.zip`))
+    assert.ok(calls[0].executable.endsWith(executable))
+    assert.equal(calls[0].options.env.ELECTRON_RUN_AS_NODE, undefined)
+    assert.match(calls[0].options.env.DSH_SESSION_TRAY_ICON, platform === 'darwin' ? /trayTemplate.png$/ : /tray.png$/)
+    manager.ready(calls[0].child.pid)
+    assert.equal(manager.status().phase, 'running')
+    assert.equal(manager.status().runtime.version, ELECTRON_VERSION)
+    await manager.action('restart')
+    assert.equal(calls.length, 2)
+    manager.ready(calls[1].child.pid)
+    await manager.action('disable')
+    assert.equal(manager.status().phase, 'stopped')
+    assert.equal(manager.status().enabled, false)
+    assert.equal(manager.status().runtime.available, true)
+  })
+}
+
+test('macOS 拒绝没有可执行权限的兼容运行时', async (t) => {
+  const { home, manager } = await fixture(t, { platform: 'darwin' })
+  const executable = join(home, '.dsh', 'electron', 'Electron.app', 'Contents', 'MacOS', 'Electron')
+  await mkdir(join(executable, '..'), { recursive: true })
+  await writeFile(executable, 'not executable', { mode: 0o644 })
+  await manager.action('enable')
+  await until(manager, state => state.phase === 'error')
+  assert.equal(manager.status().runtime.available, false)
 })
