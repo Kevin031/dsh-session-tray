@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>会话状态</title>
+  <style>
+    :root {
+      --bar-h: 28px;
+      --gap: 6px;
+      --bar-bg: #242424;
+      --panel-bg: #1b1b1b;
+      --text: #f3f6f7;
+      --muted: #a0a9b2;
+      --summary: #d5dee2;
+      --run: #e5b86a;
+      --wait: #ff7a45;
+      --done: #80c5a5;
+      --idle: #6d787c;
+      --radius: 7px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: transparent; color: var(--text); font: 12px/1.5 "Segoe UI", "Microsoft YaHei", sans-serif; }
+    body { position: relative; display: flex; flex-direction: column; height: 100%; }
+    body.width-drag, body.width-drag * { cursor: ew-resize; }
+    button { font: inherit; color: inherit; border: 0; background: transparent; padding: 0; cursor: pointer; }
+    button:focus-visible, .resize-edge:focus-visible { outline: 2px solid var(--run); outline-offset: -2px; }
+    .drag { -webkit-app-region: drag; }
+    button, .summary, .resize-edge { -webkit-app-region: no-drag; }
+    .resize-edge { position: absolute; top: 0; bottom: 0; z-index: 3; width: 8px; touch-action: none; cursor: ew-resize; background: transparent; }
+    .resize-edge.left { left: 0; }
+    .resize-edge.right { right: 0; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+    .dot.run { box-shadow: 0 0 0 3px #e5b86a17; }
+    .run { background: var(--run); }
+    .wait { background: var(--wait); }
+    .done { background: var(--done); }
+    .idle { background: var(--idle); }
+    #bar { display: flex; }
+    #card { display: none; }
+    body.expanded #bar { display: none; }
+    body.expanded #card { display: flex; }
+
+    #bar { align-items: center; gap: var(--gap); flex: none; width: 100%; height: var(--bar-h); padding: 0 10px; border-radius: var(--radius); background: var(--bar-bg); box-shadow: inset 0 0 0 1px rgba(255,255,255,.16); }
+    .grip { display: flex; width: 10px; height: 100%; flex: none; align-items: center; justify-content: center; color: #8b969b; cursor: grab; }
+    .grip svg, .chev svg { width: 12px; height: 12px; }
+    #toggle { display: flex; flex: 1; min-width: 0; align-items: center; gap: var(--gap); height: 100%; }
+    #toggle:hover .title { color: #fff; }
+    .ticker { flex: 0 1 auto; min-width: 0; max-width: 100%; height: 16px; overflow: hidden; }
+    .ticker-track { display: flex; flex-direction: column; }
+    .ticker-track.step { transform: translateY(-16px); transition: transform 320ms ease; }
+    .ticker-line { display: flex; align-items: center; gap: var(--gap); height: 16px; min-width: 0; }
+    .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .state { display: none; flex: none; font-size: 10px; white-space: nowrap; }
+    .state.done:not([hidden]) { display: block; color: var(--done); }
+    @media (prefers-reduced-motion: reduce) {
+      .ticker-track.step { transition: none; }
+    }
+    .summary { display: flex; align-items: center; gap: 4px; flex: none; margin-left: auto; color: var(--summary); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; cursor: default; }
+    .summary i { font-style: normal; background: none; }
+    .summary i.run { color: var(--run); }
+    .summary i.done { color: var(--done); }
+    .summary i.wait { color: var(--wait); }
+    .section.wait-heading { color: var(--wait); }
+    .session.needs-confirm { background: #ff7a450a; }
+    .session.needs-confirm:hover { background: #ff7a4514; }
+    .ring { display: flex; width: 16px; height: 16px; flex: none; align-items: center; justify-content: center; }
+    .ring svg { display: block; width: 16px; height: 16px; }
+    .ring .track, .ring .fill { fill: none; stroke-width: 1.6; }
+    .ring .track { stroke: rgba(255,255,255,.22); }
+    .ring .fill { stroke: #f4f7f8; stroke-linecap: round; }
+    .chev, #collapse { display: flex; align-items: center; justify-content: center; color: var(--muted); }
+    #collapse { flex: none; height: 24px; padding: 0 6px; border-radius: 5px; font-size: 12px; line-height: 1; white-space: nowrap; }
+    #collapse:hover { color: var(--text); background: #ffffff0b; }
+
+    .section { padding: 5px 7px 3px; color: var(--muted); font-size: 10px; letter-spacing: .08em; }
+    .session { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 5px 7px; border-radius: 6px; text-align: left; }
+    .session:hover { background: #ffffff06; }
+    .session .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session .meta { flex: none; color: var(--muted); font-size: 10px; white-space: nowrap; }
+    .empty { padding: 8px; color: var(--muted); }
+
+    #card { flex: 1; min-height: 0; flex-direction: column; border-radius: var(--radius); background: var(--panel-bg); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); overflow: hidden; }
+    header { display: flex; flex: none; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border-bottom: 1px solid #ffffff17; }
+    header strong { flex: 1; font-size: 12px; font-weight: 600; }
+    header .summary { margin-left: 8px; }
+    #card-list { flex: 1; min-height: 0; overflow: auto; padding: 4px; }
+  </style>
+</head>
+<body>
+  <div id="resize-left" class="resize-edge left" role="separator" aria-orientation="vertical" aria-label="拖动左边缘调整宽度" title="拖动调整宽度，双击恢复默认" tabindex="0"></div>
+  <div id="resize-right" class="resize-edge right" role="separator" aria-orientation="vertical" aria-label="拖动右边缘调整宽度" title="拖动调整宽度，双击恢复默认" tabindex="0"></div>
+  <section id="card">
+    <header class="drag">
+      <span class="grip drag" aria-hidden="true" title="拖动"></span>
+      <strong>DSH会话</strong>
+      <span class="summary" id="card-counts"></span>
+      <button id="collapse" type="button" aria-label="折叠" title="折叠" aria-controls="card" aria-expanded="false">折叠</button>
+    </header>
+    <div id="card-list"></div>
+  </section>
+  <section id="bar">
+    <span class="grip drag" aria-hidden="true" title="拖动"></span>
+    <button id="toggle" type="button" aria-label="展开会话卡片" aria-controls="card" aria-expanded="false">
+      <span id="mark" class="dot idle"></span>
+      <span id="ticker" class="ticker" aria-live="polite">
+        <span id="ticker-track" class="ticker-track">
+          <span class="ticker-line"><span id="label" class="title">会话</span></span>
+          <span class="ticker-line" aria-hidden="true"><span id="label-next" class="title"></span></span>
+        </span>
+      </span>
+      <span id="context-ring"></span>
+      <span id="bar-summary" class="summary"></span>
+      <span class="chev" aria-hidden="true"></span>
+    </button>
+  </section>
+  <script>
+    const chevronIcon = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>'
+    const gripIcon = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></svg>'
+    document.querySelectorAll('.grip').forEach((node) => { node.innerHTML = gripIcon })
+    document.querySelector('.chev').innerHTML = chevronIcon
+
+    const mark = document.getElementById('mark')
+    const label = document.getElementById('label')
+    const toggle = document.getElementById('toggle')
+    const collapse = document.getElementById('collapse')
+    const cardList = document.getElementById('card-list')
+    const cardCounts = document.getElementById('card-counts')
+    let snapshot = { stale: true, rows: [] }
+    let expanded = false
+    let slideIndex = 0
+    let tickerTimer = 0
+    let tickerPaused = false
+
+    function rows() { return Array.isArray(snapshot.rows) ? snapshot.rows : [] }
+    function counts(list) {
+      return {
+        running: list.filter((row) => row.section === 'running').length,
+        attention: list.filter((row) => row.section === 'attention').length,
+      }
+    }
+    function ago(updatedAt) {
+      const ts = Number(updatedAt) || 0
+      if (!ts) return ''
+      const minutes = Math.max(0, Math.round((Date.now() - ts) / 60000))
+      if (minutes < 1) return '刚刚'
+      if (minutes < 60) return `${minutes} 分钟前`
+      const hours = Math.round(minutes / 60)
+      return hours < 24 ? `${hours} 小时前` : `${Math.round(hours / 24)} 天前`
+    }
+    function tone(row) {
+      if (row?.label === '已完成') return 'done'
+      if (row?.section === 'running') return 'run'
+      if (row?.section === 'attention') return 'wait'
+      return 'idle'
+    }
+    function primary() {
+      const list = rows()
+      return list.find((row) => row.section === 'attention') || list[0] || null
+    }
+    function formatTokens(value) {
+      const n = Number(value) || 0
+      if (n < 1000) return String(Math.round(n))
+      if (n < 1e6) return `${Math.round(n / 100) / 10}K`
+      return `${Math.round(n / 1e5) / 10}M`
+    }
+    function ringNode(row) {
+      if (!row || row.contextPercent === undefined || row.contextPercent === null) return null
+      const percent = row.contextPercent
+      const radius = 6.2
+      const circumference = 2 * Math.PI * radius
+      const node = document.createElement('span')
+      node.className = 'ring'
+      const caption = `上下文已用 ${percent}% · ${formatTokens(row.usedTokens)} / ${formatTokens(row.contextWindow)}`
+      node.title = caption
+      node.setAttribute('aria-label', caption)
+      node.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true"><circle class="track" cx="8" cy="8" r="${radius}"></circle><circle class="fill" cx="8" cy="8" r="${radius}" stroke-dasharray="${(circumference * percent / 100).toFixed(2)} ${circumference.toFixed(2)}" transform="rotate(-90 8 8)"></circle></svg>`
+      return node
+    }
+    function summaryParts(list, count) {
+      const done = list.filter((row) => row.label === '已完成').length
+      const pending = count.attention - done
+      const parts = []
+      if (count.running > 0) parts.push({ tone: 'run', text: `运行 ${count.running}` })
+      if (pending > 0) parts.push({ tone: 'wait', text: `待确认 ${pending}` })
+      if (done > 0) parts.push({ tone: 'done', text: `完成 ${done}` })
+      return parts
+    }
+    function paintSummary(host, parts) {
+      host.replaceChildren()
+      parts.forEach((part) => {
+        const label = document.createElement('i')
+        label.className = part.tone
+        label.textContent = part.text
+        host.append(label)
+      })
+    }
+    function fillList(host, list) {
+      host.replaceChildren()
+      if (snapshot.stale) {
+        const empty = document.createElement('div')
+        empty.className = 'empty'
+        empty.textContent = '页面未连接'
+        host.append(empty)
+        return
+      }
+      if (list.length === 0) {
+        const empty = document.createElement('div')
+        empty.className = 'empty'
+        empty.textContent = '没有需要处理的会话'
+        host.append(empty)
+        return
+      }
+      append(host, '运行中', list.filter((row) => row.section === 'running'))
+      append(host, '待确认', list.filter((row) => row.section === 'attention' && row.label !== '已完成'))
+      append(host, '已完成', list.filter((row) => row.section === 'attention' && row.label === '已完成'))
+    }
+    function append(host, heading, list) {
+      if (list.length === 0) return
+      const title = document.createElement('div')
+      title.className = heading === '待确认' ? 'section wait-heading' : 'section'
+      title.textContent = heading
+      host.append(title)
+      for (const row of list) {
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = row.section === 'attention' && row.label !== '已完成' ? 'session needs-confirm' : 'session'
+        const dot = document.createElement('span')
+        dot.className = `dot ${tone(row)}`
+        const name = document.createElement('span')
+        name.className = 'name'
+        name.textContent = row.title || '未命名会话'
+        const meta = document.createElement('span')
+        meta.className = 'meta'
+        meta.textContent = ago(row.updatedAt)
+        button.append(dot, name, meta)
+        const ring = ringNode(row)
+        if (ring) button.append(ring)
+        button.addEventListener('click', () => {
+          window.sessionDock.open(row.id)
+        })
+        host.append(button)
+      }
+    }
+    function slideItems() {
+      const list = rows()
+      const running = list.filter((row) => row.section === 'running')
+      if (snapshot.stale) return [{ kind: 'session', tone: 'idle', text: '未连接', state: '', row: null }]
+      if (running.length > 0) {
+        return running.map((row) => ({
+          kind: 'session',
+          tone: tone(row),
+          text: row.title || '未命名会话',
+          state: row.label || '',
+          row,
+        }))
+      }
+      const done = list.filter((row) => row.label === '已完成')
+      // 没有运行中、也没有待确认时，单行不能只写“空闲”，要露出已完成任务。
+      if (done.length > 0 && done.length === list.length) {
+        return done.map((row) => ({
+          kind: 'session',
+          tone: 'done',
+          text: row.title || '未命名会话',
+          state: '已完成',
+          row,
+        }))
+      }
+      return [{ kind: 'session', tone: 'idle', text: '空闲', state: '', row: null }]
+    }
+    function paintLine(titleNode, stateNode, slide) {
+      titleNode.textContent = slide.text
+      if (!stateNode) return
+      stateNode.textContent = slide.state
+      stateNode.hidden = slide.state === ''
+      stateNode.className = slide.tone === 'done' && slide.state ? 'state done' : 'state'
+    }
+    function paintSlide(slide) {
+      mark.className = `dot ${slide.tone}`
+      paintLine(label, document.getElementById('label-state'), slide)
+      const ringHost = document.getElementById('context-ring')
+      ringHost.replaceChildren()
+      const ring = slide.kind === 'session' ? ringNode(slide.row) : null
+      if (ring) ringHost.append(ring)
+      toggle.title = slide.kind === 'overview' ? slide.text : `${slide.text} ${slide.state}`.trim()
+    }
+    function ensureStateNode(line, id) {
+      let state = document.getElementById(id)
+      if (state) return state
+      state = document.createElement('span')
+      state.id = id
+      state.className = 'state'
+      line.append(state)
+      return state
+    }
+    function advanceTicker() {
+      const slides = slideItems()
+      if (slides.length < 2 || expanded || tickerPaused) return
+      const next = slides[(slideIndex + 1) % slides.length]
+      const track = document.getElementById('ticker-track')
+      const nextLine = track.children[1]
+      paintLine(document.getElementById('label-next'), ensureStateNode(nextLine, 'label-next-state'), next)
+      const finish = () => {
+        track.removeEventListener('transitionend', finish)
+        slideIndex = (slideIndex + 1) % slides.length
+        track.classList.remove('step')
+        paintSlide(slides[slideIndex])
+      }
+      track.addEventListener('transitionend', finish)
+      track.classList.add('step')
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) finish()
+    }
+    function armTicker() {
+      window.clearInterval(tickerTimer)
+      tickerTimer = window.setInterval(advanceTicker, 3200)
+    }
+    function render() {
+      const list = rows()
+      const count = counts(list)
+      const slides = slideItems()
+      slideIndex = Math.min(slideIndex, slides.length - 1)
+      const parts = summaryParts(list, count)
+      paintSummary(document.getElementById('bar-summary'), parts)
+      paintSummary(cardCounts, parts)
+      ensureStateNode(label.parentElement, 'label-state')
+      paintSlide(slides[slideIndex])
+      fillList(cardList, list)
+      armTicker()
+    }
+    /** @param {boolean} open @param {boolean} [notify] */
+    function setExpanded(open, notify = true) {
+      expanded = open === true
+      document.body.classList.toggle('expanded', expanded)
+      toggle.setAttribute('aria-expanded', String(expanded))
+      collapse.setAttribute('aria-expanded', String(expanded))
+      if (notify) window.sessionDock.setExpanded(expanded)
+      // 隐藏前将焦点交给另一种形态的切换按钮，保证键盘可连续往返操作。
+      if (document.hasFocus()) (expanded ? collapse : toggle).focus({ preventScroll: true })
+    }
+    document.getElementById('bar').addEventListener('pointerenter', () => { tickerPaused = true })
+    document.getElementById('bar').addEventListener('pointerleave', () => { tickerPaused = false })
+    toggle.addEventListener('click', () => setExpanded(true))
+    collapse.addEventListener('click', () => setExpanded(false))
+    /**
+     * 边缘悬停显示调整光标；按下后由主进程跟踪，避免缩小时鼠标离开窗口丢事件。
+     * @param {HTMLElement} node
+     * @param {'left' | 'right'} edge
+     */
+    function bindWidthEdge(node, edge) {
+      const stop = () => {
+        document.body.classList.remove('width-drag')
+        window.sessionDock.endWidthDrag()
+      }
+      node.addEventListener('pointerdown', (event) => {
+        const pointer = /** @type {PointerEvent} */ (event)
+        if (pointer.button !== 0) return
+        pointer.preventDefault()
+        if (typeof node.setPointerCapture === 'function') node.setPointerCapture(pointer.pointerId)
+        document.body.classList.add('width-drag')
+        window.sessionDock.beginWidthDrag(edge)
+      })
+      node.addEventListener('pointerup', stop)
+      node.addEventListener('pointercancel', stop)
+      node.addEventListener('dblclick', (event) => {
+        event.preventDefault()
+        window.sessionDock.resetWidth(edge)
+      })
+      node.addEventListener('keydown', (event) => {
+        const key = /** @type {KeyboardEvent} */ (event)
+        if (key.key !== 'ArrowLeft' && key.key !== 'ArrowRight') return
+        key.preventDefault()
+        const step = key.shiftKey ? 48 : 16
+        const toward = key.key === 'ArrowRight' ? 1 : -1
+        const widthDelta = edge === 'left' ? -toward * step : toward * step
+        window.sessionDock.nudgeWidth(edge, widthDelta)
+      })
+    }
+    const resizeLeft = document.getElementById('resize-left')
+    const resizeRight = document.getElementById('resize-right')
+    if (resizeLeft) bindWidthEdge(resizeLeft, 'left')
+    if (resizeRight) bindWidthEdge(resizeRight, 'right')
+    document.body.addEventListener('contextmenu', (event) => {
+      event.preventDefault()
+      window.sessionDock.showMenu()
+    })
+    window.sessionDock.onExpanded((open) => setExpanded(open, false))
+    window.sessionDock.onSnapshot((next) => {
+      snapshot = next || { stale: true, rows: [] }
+      render()
+    })
+    render()
+  </script>
+</body>
+</html>

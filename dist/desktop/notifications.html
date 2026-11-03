@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>会话通知</title>
+  <style>
+    :root { color-scheme: dark; --wait: #ff7a45; --done: #80c5a5; --text: #f3f6f7; --muted: #a0a9b2; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; color: var(--text); font: 16px/1.5 "Segoe UI", "Microsoft YaHei", sans-serif; }
+    #viewport { display: flex; flex-direction: column; height: 100%; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #606060 #292929; }
+    #stack { display: flex; flex-direction: column; gap: 10px; margin-top: auto; padding: 1px; }
+    button { appearance: none; font: inherit; color: inherit; border: 0; background: transparent; padding: 0; cursor: pointer; }
+    .notice { flex: none; position: relative; border: 1px solid #414141; border-radius: 10px; padding: 8px 8px 14px 16px; background: #292929; color: #f3f6f7; animation: rise-in 280ms cubic-bezier(.2,.8,.2,1) both; }
+    .notice-head { display: flex; align-items: center; gap: 9px; color: var(--wait); font-size: 14px; }
+    .notice.done .notice-head { color: var(--done); }
+    .notice.done { cursor: pointer; }
+    .notice-open { position: absolute; inset: 0; z-index: 1; border-radius: inherit; }
+    .notice.done .notice-close { position: relative; z-index: 2; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--wait); flex: none; }
+    .notice.done .dot { background: var(--done); }
+    .notice-head strong { flex: 1; font-weight: 600; }
+    .notice-close { display: grid; place-items: center; width: 28px; height: 28px; color: var(--muted); border-radius: 5px; }
+    .notice-close:hover { background: #ffffff10; color: var(--text); }
+    .notice-close svg { width: 16px; height: 16px; }
+    .notice-title { margin: 6px 0 4px; font-weight: 600; font-size: 16px; overflow-wrap: anywhere; }
+    .notice-copy { margin: 0; color: #bfc3c7; font-size: 14px; }
+    .notice-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 13px; }
+    .notice-actions button { padding: 5px 13px; border: 1px solid transparent; border-radius: 5px; font-size: 14px; }
+    .notice-actions .later { background: #292929; border-color: #505050; color: #e0e3e6; }
+    .notice-actions .later:hover { background: #363636; border-color: #6a6a6a; }
+    .notice-actions .later:active { background: #222222; }
+    .notice-actions .confirm { background: #ff7a45; border-color: #ff7a45; color: #ffffff; font-weight: 600; }
+    .notice-actions .confirm:hover { background: #ff9469; border-color: #ff9469; }
+    .notice-actions .confirm:active { background: #ee6936; border-color: #ee6936; }
+    .notice button:focus-visible { outline: 2px solid #ffb494; outline-offset: 2px; }
+    .notice-error { margin: 10px 0 0; color: #ffb494; font-size: 14px; }
+    @keyframes rise-in { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    @media (prefers-reduced-motion: reduce) { .notice { animation: none; } }
+    body.compact { font-size: 12px; }
+    body.compact #stack { gap: 8px; }
+    body.compact .notice { border-radius: 8px; padding: 6px 6px 11px 12px; }
+    body.compact .notice-head { gap: 7px; font-size: 11px; }
+    body.compact .dot { width: 7px; height: 7px; }
+    body.compact .notice-close { width: 22px; height: 22px; border-radius: 4px; }
+    body.compact .notice-close svg { width: 12px; height: 12px; }
+    body.compact .notice-title { margin: 5px 0 3px; font-size: 12px; }
+    body.compact .notice-copy { font-size: 11px; }
+    body.compact .notice-actions { gap: 8px; margin-top: 10px; }
+    body.compact .notice-actions button { padding: 4px 10px; border-radius: 4px; font-size: 11px; }
+    body.compact .notice-error { margin: 8px 0 0; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <div id="viewport" aria-label="会话通知列表" tabindex="-1"><main id="stack"></main></div>
+  <script>
+    const stack = document.getElementById('stack')
+    const viewport = document.getElementById('viewport')
+    const cards = new Map()
+    /** 报告自然内容高度，栈超过工作区时由视口滚动，不丢弃通知。 */
+    function reportHeight() {
+      window.sessionDock.notificationHeight(stack.scrollHeight)
+    }
+    /**
+     * 只创建新周期节点，事件监听始终读取该节点的最新会话信息。
+     * @param {{ id: string, title: string, label: string, kind?: 'pending' | 'done', durationSeconds?: number, responsePreview?: string, sessionId?: string }} row
+     * @returns {{ node: HTMLElement, title: HTMLParagraphElement, row: { id: string, title: string, label: string, kind?: 'pending' | 'done', durationSeconds?: number, responsePreview?: string, sessionId?: string } }}
+     */
+    function createCard(row) {
+      const done = row.kind === 'done'
+      const node = document.createElement('article')
+      node.className = done ? 'notice done' : 'notice'
+      node.innerHTML = done
+        ? '<div class="notice-head"><span class="dot" aria-hidden="true"></span><strong>任务已完成</strong><button class="notice-close" type="button" aria-label="关闭通知"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><p class="notice-title"></p><p class="notice-copy"></p>'
+        : '<div class="notice-head"><span class="dot" aria-hidden="true"></span><strong>有 1 条消息待确认</strong><button class="notice-close" type="button" aria-label="关闭通知"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><p class="notice-title"></p><p class="notice-copy">需要你确认后才能继续。</p><div class="notice-actions"><button class="later" type="button">稍后处理</button><button class="confirm" type="button">去确认</button></div><p class="notice-error" hidden role="status"></p>'
+      const entry = { node, title: /** @type {HTMLParagraphElement} */ (node.querySelector('.notice-title')), row }
+      node.querySelector('.notice-close').addEventListener('click', () => window.sessionDock.dismissNotification(entry.row.id))
+      if (done) {
+        const open = document.createElement('button')
+        open.className = 'notice-open'
+        open.type = 'button'
+        open.setAttribute('aria-label', `打开会话：${row.title}`)
+        node.prepend(open)
+        const error = document.createElement('p')
+        error.className = 'notice-error'
+        error.hidden = true
+        error.setAttribute('role', 'status')
+        node.append(error)
+        open.addEventListener('click', async () => {
+          error.hidden = true
+          try { await window.sessionDock.open(entry.row.sessionId || entry.row.id) }
+          catch { error.textContent = '打开失败，请重试。'; error.hidden = false }
+          reportHeight()
+        })
+      } else {
+        node.querySelector('.later').addEventListener('click', () => window.sessionDock.dismissNotification(entry.row.id))
+        node.querySelector('.confirm').addEventListener('click', async () => {
+          const error = /** @type {HTMLParagraphElement} */ (node.querySelector('.notice-error'))
+          error.hidden = true
+          try { await window.sessionDock.open(entry.row.sessionId || entry.row.id) }
+          catch { error.textContent = '打开失败，请重试。'; error.hidden = false }
+          reportHeight()
+        })
+      }
+      return entry
+    }
+    /**
+     * 按会话键增量更新；重复快照不替换节点、不重置焦点与动画。
+     * @param {{ id: string, title: string, label: string, kind?: 'pending' | 'done', durationSeconds?: number, responsePreview?: string, sessionId?: string }[]} rows
+     */
+    function renderNotifications(rows) {
+      const ids = new Set(rows.map((row) => row.id))
+      let removedFocus = false
+      for (const [id, entry] of cards) {
+        if (ids.has(id)) continue
+        if (entry.node.contains(document.activeElement)) removedFocus = true
+        entry.node.remove()
+        cards.delete(id)
+      }
+      let anchor = stack.firstElementChild
+      let added = false
+      for (const row of rows) {
+        let entry = cards.get(row.id)
+        if (!entry) { entry = createCard(row); cards.set(row.id, entry); added = true }
+        entry.row = row
+        if (row.kind === 'done') {
+          entry.node.querySelector('.notice-open').setAttribute('aria-label', `打开会话：${row.title}`)
+          const copy = entry.node.querySelector('.notice-copy')
+          const text = (row.responsePreview || '').replace(/\s+/g, ' ').trim()
+          const points = Array.from(text)
+          copy.textContent = points.length > 80 ? `${points.slice(0, 80).join('')}...` : text
+          copy.hidden = !text
+        }
+        if (entry.title.textContent !== row.title) entry.title.textContent = row.title
+        if (entry.node !== anchor) stack.insertBefore(entry.node, anchor)
+        anchor = entry.node.nextElementSibling
+      }
+      if (added) viewport.scrollTop = 0
+      if (removedFocus && stack.firstElementChild) stack.firstElementChild.querySelector('button').focus({ preventScroll: true })
+      reportHeight()
+    }
+    /** @param {{ density?: string }} layout */
+    function applyLayout(layout) {
+      document.body.classList.toggle('compact', layout?.density === 'compact')
+      reportHeight()
+    }
+    new ResizeObserver(reportHeight).observe(stack)
+    window.sessionDock.onNotificationLayout(applyLayout)
+    window.sessionDock.onNotifications(renderNotifications)
+  </script>
+</body>
+</html>

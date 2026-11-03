@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Desktop Status Bar",
+    "description": "Shows running sessions and sessions needing attention on Windows. Install the runtime, control the overlay and reset its position in Settings. Drag either edge to resize the width."
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "name": "dsh-session-tray",
+  "version": "0.3.0",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "sync:layout-mock": "node scripts/sync-layout-mock.mjs",
+    "dev:preview": "node scripts/preview.mjs",
+    "build:intro": "node scripts/build-intro.mjs",
+    "publish:intro": "node scripts/publish-intro.mjs",
+    "test": "node --test tests/*.test.cjs tests/*.test.mjs",
+    "typecheck": "node tests/typecheck.cjs",
+    "check": "npm run build && npm test && npm run typecheck",
+    "pack:release": "npm run check && npm pack"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.0",
+    "typescript": "5.9.3",
+    "vite": "8.3.5"
+  },
+  "private": true,
+  "description": "Windows 桌面状态栏，支持设置页一键安装运行时、启停和位置管理。",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./dist/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "assets/tray.png",
+    "runtime-manager.js",
+    "dist/desktop/**",
+    "dist/client.js",
+    "settings-client.js",
+    "scripts/build.mjs",
+    "helper/main.cjs",
+    "helper/preload.cjs",
+    "helper/dock.html",
+    "helper/notifications.html",
+    "helper/settings.html",
+    "helper/taskbar.cjs",
+    "helper/tray-platform.cjs"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-connection"
+      ]
+    }
+  }
+}
